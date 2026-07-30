@@ -1,0 +1,8 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = [
+    # PuLP 3.x warns that PULP_CBC_CMD / direct LpVariable construction will
+    # change in 4.0. We pin pulp<4 on purpose, so the noise is not actionable.
+    "ignore::DeprecationWarning:pulp",
+]

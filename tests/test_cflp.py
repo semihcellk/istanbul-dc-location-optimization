@@ -1,7 +1,7 @@
 """
 tests/test_cflp.py
 
-Unit tests — CFLP CBC Exact Solver
+Unit tests — CFLP solvers (CBC exact + greedy heuristic).
 
 Run with pytest:
     python -m pytest tests/test_cflp.py -v
@@ -15,7 +15,7 @@ import pytest
 # Ensure project root is importable
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from model.cflp import solve_cflp
+from model.cflp import solve_cflp, opening_costs, split_costs
 
 
 # ── Test 1: Trivial single DC ───────────────────────────────────────────────
@@ -184,3 +184,139 @@ def test_cbc_at_least_as_good_as_greedy():
     assert res_cbc["objective"] <= res_greedy["objective"] + 1e-6, (
         f"CBC ({res_cbc['objective']:.4f}) should be ≤ Greedy ({res_greedy['objective']:.4f})"
     )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Greedy heuristic
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ── Test 6: Greedy picks the first DC on cost, not on array order ────────────
+# Regression test. The heuristic used to start from assign_cost = +inf, which
+# made every candidate score gain = +inf on the first iteration, so argmax
+# always returned index 0 — the first DC was chosen by position in the array.
+
+def test_greedy_first_pick_is_cost_based():
+    """The first DC opened must be the cheapest one, even when it is not index 0."""
+    n = 6
+    t = np.full((n, n), 5.0)
+    np.fill_diagonal(t, 0.0)
+    t[:, 3] = 0.1     # DC 3 is close to everyone
+    t[:, 0] = 4.0     # DC 0 is far from everyone
+    r = np.array([1000.0, 50.0, 50.0, 1.0, 50.0, 50.0])   # DC 0 also has the worst rent
+    w = np.full(n, 100.0)
+
+    res = solve_cflp(w, t, r, alpha=1.0, Q=1000.0, Q0=100.0, method="greedy")
+
+    assert res["y"][3] == 1.0, "The cheapest candidate (index 3) must be opened"
+    assert res["y"][0] == 0.0, "The worst candidate (index 0) must not be opened"
+
+
+# ── Test 7: Greedy respects capacity and assigns everyone ───────────────────
+
+def test_greedy_solution_is_feasible():
+    """Greedy output must satisfy the same constraints as the MILP."""
+    rng = np.random.default_rng(7)
+    n = 40
+
+    w = rng.uniform(50, 500, size=n)
+    t = rng.uniform(0.1, 3.0, size=(n, n))
+    np.fill_diagonal(t, 0.0)
+    r = rng.uniform(5, 50, size=n)
+    Q = 2000.0
+
+    res = solve_cflp(w, t, r, alpha=1.0, Q=Q, Q0=100.0, method="greedy")
+    y, z = res["y"], res["z"]
+
+    assert res["n_unassigned"] == 0, "every neighborhood must be served"
+    np.testing.assert_array_almost_equal(
+        z.sum(axis=1), np.ones(n),
+        err_msg="each neighborhood must be assigned to exactly one DC",
+    )
+    assert np.all(z <= y[None, :] + 1e-9), "neighborhoods may only be assigned to open DCs"
+
+    loads = w @ z
+    assert np.all(loads <= Q + 1e-6), f"capacity exceeded: max load {loads.max():.1f} > Q={Q}"
+
+    # Reported objective must match the assignment it returns
+    opening, service = split_costs(res, r, 1.0, Q, 100.0)
+    assert abs(opening - float(opening_costs(r, 1.0, Q, 100.0) @ y)) < 1e-6
+    assert abs(service - float(np.sum(w[:, None] * t * z))) < 1e-6
+
+
+# ── Test 8: Tight capacity forces the required number of DCs ────────────────
+
+def test_greedy_opens_enough_dcs_under_tight_capacity():
+    """With total demand ≫ Q, greedy must open at least ceil(Σw / Q) DCs."""
+    n = 30
+    rng = np.random.default_rng(11)
+    w = np.full(n, 100.0)
+    t = rng.uniform(0.5, 2.0, size=(n, n))
+    np.fill_diagonal(t, 0.0)
+    r = np.full(n, 10.0)
+    Q = 400.0   # total demand 3000 → at least 8 DCs needed
+
+    res = solve_cflp(w, t, r, alpha=1.0, Q=Q, Q0=100.0, method="greedy")
+
+    assert res["n_unassigned"] == 0
+    assert int(res["y"].sum()) >= int(np.ceil(w.sum() / Q))
+
+
+# ── Test 9: Rectangular instances (demand points ≠ candidate sites) ─────────
+
+def test_greedy_supports_rectangular_travel_matrix():
+    """Greedy must handle n_I ≠ n_J, like the CBC path already does."""
+    rng = np.random.default_rng(3)
+    n_I, n_J = 12, 4
+
+    w = rng.uniform(50, 200, size=n_I)
+    t = rng.uniform(0.1, 2.0, size=(n_I, n_J))
+    r = rng.uniform(10, 30, size=n_J)
+
+    res = solve_cflp(w, t, r, alpha=1.0, Q=5000.0, Q0=100.0, method="greedy")
+
+    assert res["y"].shape == (n_J,)
+    assert res["z"].shape == (n_I, n_J)
+    assert res["n_unassigned"] == 0
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Input validation
+# ══════════════════════════════════════════════════════════════════════════════
+
+@pytest.mark.parametrize("method", ["cbc", "greedy"])
+def test_rejects_mismatched_shapes(method):
+    """A travel matrix that does not line up with w or r must fail loudly."""
+    w = np.array([100.0, 200.0])
+    t = np.ones((3, 2))          # 3 rows but only 2 demand points
+    r = np.array([10.0, 10.0])
+
+    with pytest.raises(ValueError, match="rows"):
+        solve_cflp(w, t, r, 1.0, 1000.0, 100.0, method=method)
+
+
+def test_rejects_demand_larger_than_capacity():
+    """A neighborhood bigger than a whole DC makes the instance infeasible."""
+    w = np.array([100.0, 5000.0])
+    t = np.ones((2, 2))
+    r = np.array([10.0, 10.0])
+
+    with pytest.raises(ValueError, match="infeasible"):
+        solve_cflp(w, t, r, 1.0, 1000.0, 100.0, method="greedy")
+
+
+def test_rejects_unknown_method():
+    w = np.array([100.0])
+    t = np.ones((1, 1))
+    r = np.array([10.0])
+
+    with pytest.raises(ValueError, match="Unknown method"):
+        solve_cflp(w, t, r, 1.0, 1000.0, 100.0, method="simulated_annealing")
+
+
+# ── Opening-cost helper ─────────────────────────────────────────────────────
+
+def test_opening_cost_formula():
+    """f_j = α · r_j · √(Q/Q₀)"""
+    r = np.array([100.0, 200.0])
+    f = opening_costs(r, alpha=2.0, Q=400.0, Q0=100.0)
+    np.testing.assert_allclose(f, [400.0, 800.0])   # 2 · r · √4 = 4r
