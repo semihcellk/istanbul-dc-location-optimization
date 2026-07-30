@@ -1,12 +1,12 @@
-instance_size,method,runtime_s,objective_value,n_open_dcs,gap
-20,greedy,0.001,16455.58,17,0.0
-20,cbc,0.075,14979.81,16,0.0
-50,greedy,0.003,32050.49,33,0.0
-50,cbc,0.124,31444.04,32,0.0
-100,greedy,0.011,59055.87,55,0.0
-100,cbc,0.685,57996.9,52,0.0
-200,greedy,0.046,100282.74,89,0.0
-200,cbc,10.788,96531.46,86,0.0
-400,greedy,0.272,176213.25,164,0.0
-400,cbc,137.478,167256.74,153,
-890,greedy,2.416,366783.83,335,0.0
+instance_size,method,runtime_s,objective_value,n_open_dcs,gap,status
+20,greedy,0.003,22801.82,15,0.0,Heuristic
+20,cbc,0.045,20580.69,14,0.0,Optimal
+50,greedy,0.004,42811.55,29,0.0,Heuristic
+50,cbc,0.153,40855.97,28,0.0,Optimal
+100,greedy,0.005,77976.28,48,0.0,Heuristic
+100,cbc,0.946,75616.27,47,0.0,Optimal
+200,greedy,0.047,133040.86,83,0.0,Heuristic
+200,cbc,13.663,123461.94,71,0.0,Optimal
+400,greedy,0.443,232680.2,146,0.0,Heuristic
+400,cbc,216.132,210324.94,129,,Not Solved
+890,greedy,3.236,457671.13,275,0.0,Heuristic
