@@ -1,6 +1,6 @@
 # Traffic-Aware Distribution Center Location — Istanbul
 
-[![tests](https://img.shields.io/badge/tests-36%20passing-brightgreen)](tests/)
+[![tests](https://github.com/semihcellk/istanbul-dc-location-optimization/actions/workflows/tests.yml/badge.svg)](https://github.com/semihcellk/istanbul-dc-location-optimization/actions/workflows/tests.yml)
 [![python](https://img.shields.io/badge/python-3.10%2B-blue)](requirements.txt)
 [![solver](https://img.shields.io/badge/solver-CBC%20%2F%20greedy-orange)](model/cflp.py)
 [![license](https://img.shields.io/badge/license-MIT-lightgrey)](LICENSE)
