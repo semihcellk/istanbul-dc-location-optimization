@@ -5,7 +5,7 @@
 [![solver](https://img.shields.io/badge/solver-CBC%20%2F%20greedy-orange)](model/cflp.py)
 [![license](https://img.shields.io/badge/license-MIT-lightgrey)](LICENSE)
 
-> **Academic Note:** *Developed as a group project for **YZV 202E — Optimization for Data Science** at **Istanbul Technical University (ITU)**, Spring 2025-2026.*
+> *Developed as a group project for **YZV 202E — Optimization for Data Science** at **Istanbul Technical University (ITU)**, Spring 2025-2026.*
 
 Where should a last-mile delivery operator put its distribution centers (DCs) in Istanbul?
 
