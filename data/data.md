@@ -25,13 +25,18 @@ Traffic-Aware Distribution Center Location project.
 - **Coverage:** 961 Istanbul neighborhoods
 - **Role in model:** Demand weights `w_i` for each neighborhood
 
-### 3. istanbul_ilce_kira_fiyatlari.csv
+### 3. istanbul_tum_mahalleler.csv / istanbul_tum_ilceler.csv
 - **Source:** Endeksa — Commercial Real Estate Indices
 - **URL:** https://www.endeksa.com
-- **Content:** District-level commercial rent per m² (TL) for Istanbul districts
-- **Fields used:** `İlçe` (district), `Metrekare_Kira_Bedeli_TL` (rent per m²)
-- **Coverage:** 40 districts (15 missing districts filled with median)
-- **Role in model:** Base rent values `r̄_d(j)` used in opening cost formula `f_j = α · r̄_d(j) · √(Q/Q₀)`
+- **Format:** semicolon-separated, values like `528 ₺/m 2` (parsed by `parse_rent`)
+- **Content:**
+  - `istanbul_tum_mahalleler.csv` — **neighborhood-level** rent per m² (965 rows).
+    Fields used: `İlçe` (district), `Mahalle` (neighborhood), `Birim Fiyatı (₺/m2)`.
+  - `istanbul_tum_ilceler.csv` — **district-level** rent per m² (38 rows), used as a
+    fallback when a neighborhood has no entry. Note that its first column is named
+    `Mahalle` in the export even though it holds district names.
+- **Role in model:** Base rent values `r_j` used in the opening cost formula
+  `f_j = α · r_j · √(Q/Q₀)`
 
 ### 4. IBB Hourly Traffic Density Data Set (fetched at runtime)
 - **Source:** Istanbul Metropolitan Municipality Open Data Portal — CKAN API
@@ -94,9 +99,18 @@ Traffic-Aware Distribution Center Location project.
 > GeoJSON boundary file) was deemed unnecessary for project purposes.
 
 ### Step 4 — Rent Data
-- Loaded `istanbul_tum_mahalleler.csv` (neighborhood-level) and `istanbul_tum_ilceler.csv` (district-level) for rent data
-- Mismatched neighborhoods were fixed using a dictionary of aliases
-- Filled missing mahalle rents with district-level averages, and remaining with the median rent (357 TL/m²)
+- Loaded `istanbul_tum_mahalleler.csv` (neighborhood-level, 817 usable rows) and
+  `istanbul_tum_ilceler.csv` (district-level, 39 districts) for rent data
+- Mismatched neighborhood names were fixed with a dictionary of 19 aliases (`ALIASES_RENT`)
+- Coverage after matching:
+
+| Source | Neighborhoods | Share |
+|--------|---------------|-------|
+| Endeksa neighborhood-level rent | 741 | 83.3% |
+| District average (fallback) | 149 | 16.7% |
+| Citywide median, 385 TL/m² (last resort) | 0 | 0% |
+
+- Resulting `rent_per_m2`: min 73, mean 425, max 1,328 TL/m²/month
 
 ### Step 5 — Hourly Speed Profiles (one-month average, spatial)
 - Used one full month of **hourly** traffic density (Ekim 2024).

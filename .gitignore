@@ -187,3 +187,9 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+# ── Project-specific ──────────────────────────────────────────────────────────
+# Jupyter checkpoints are already covered above. Generated artifacts (results/,
+# outputs/) are deliberately committed so the repo is browsable without a
+# 20-minute rerun; only scratch files are excluded here.
+scratch/
+*.tmp
