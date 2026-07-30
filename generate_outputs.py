@@ -16,15 +16,15 @@ import os
 import sys
 import json
 
-# Fix Windows console encoding
-if sys.stdout.encoding != "utf-8":
-    sys.stdout.reconfigure(encoding="utf-8")
+# Fix Windows console encoding (cp1252 cannot render the box-drawing output)
+if (sys.stdout.encoding or "").lower() != "utf-8" and hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 import matplotlib
-matplotlib.use("Agg")
+matplotlib.use("Agg")     # must be set before pyplot is imported
+import matplotlib.pyplot as plt
 import seaborn as sns
 import folium
 from folium.plugins import MarkerCluster
@@ -32,13 +32,15 @@ from folium.plugins import MarkerCluster
 # ── project paths ─────────────────────────────────────────────────────────────
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.join(BASE_DIR, "data", "processed")
-RESULTS_DIR = os.path.join(BASE_DIR, "results")
-MAPS_DIR = os.path.join(BASE_DIR, "outputs", "maps")
-FIGS_DIR = os.path.join(BASE_DIR, "outputs", "figures")
-
 sys.path.insert(0, BASE_DIR)
-from model.cflp import solve_cflp
+
+import config
+from model.cflp import solve_cflp, split_costs
+
+DATA_DIR = config.PROCESSED_DIR
+RESULTS_DIR = config.RESULTS_DIR
+MAPS_DIR = config.MAPS_DIR
+FIGS_DIR = config.FIGURES_DIR
 
 os.makedirs(MAPS_DIR, exist_ok=True)
 os.makedirs(FIGS_DIR, exist_ok=True)
@@ -47,21 +49,17 @@ os.makedirs(RESULTS_DIR, exist_ok=True)
 # ── data loading ──────────────────────────────────────────────────────────────
 
 print("Loading data...")
-df_n = pd.read_csv(os.path.join(DATA_DIR, "neighborhoods.csv"))
-w = df_n["population"].values.astype(float)
-r = df_n["rent_per_m2"].values.astype(float)
-
-t_blended = np.load(os.path.join(DATA_DIR, "travel_times.npy"))
+w, t_blended, r, df_n = config.load_instance()
 t_peak = np.load(os.path.join(DATA_DIR, "travel_times_peak.npy"))
 t_offpeak = np.load(os.path.join(DATA_DIR, "travel_times_offpeak.npy"))
 
 print(f"   {len(w)} neighborhoods loaded.")
 
-# ── parameters ────────────────────────────────────────────────────────────────
+# ── parameters (single source of truth: config.py) ────────────────────────────
 
-ALPHA = 1.37         # operating point from the 1D parameter search (Golden+Fibonacci, α≈1.37)
-Q = 200_000.0
-Q0 = 100_000.0
+ALPHA = config.ALPHA
+Q = config.Q
+Q0 = config.Q0
 
 # ══════════════════════════════════════════════════════════════════════════════
 # 1. INTERACTIVE FOLIUM MAPS
@@ -294,42 +292,51 @@ for scenario_name, t_matrix in scenarios.items():
     
     for a in alphas_pareto:
         res = solve_cflp(w, t_matrix, r, a, Q, Q0, method="greedy")
-        n_open = int(res["y"].sum())
-        f_vals = a * r * np.sqrt(Q / Q0)
-        opening_cost = float(f_vals @ res["y"])
-        service_cost = res["objective"] - opening_cost
-        n_opens.append(n_open)
+        _, service_cost = split_costs(res, r, a, Q, Q0)
+        n_opens.append(int(res["y"].sum()))
         service_costs.append(service_cost)
     
-    # Find knee point (minimum L)
+    # Knee of *this* sweep: L is normalised over the α grid plotted here, which
+    # is not the same normaliser the outer-layer search uses (that one is
+    # pre-sampled over the whole (α, Q) box). The two therefore land on slightly
+    # different α — the star marks the knee of the curve you are looking at,
+    # the circle marks the operating point the project actually reports.
     n_opens_arr = np.array(n_opens, dtype=float)
     s_arr = np.array(service_costs, dtype=float)
     n_hat = (n_opens_arr - n_opens_arr.min()) / (n_opens_arr.max() - n_opens_arr.min() + 1e-10)
     s_hat = (s_arr - s_arr.min()) / (s_arr.max() - s_arr.min() + 1e-10)
     L = n_hat + s_hat
-    knee_idx = np.argmin(L)
+    knee_idx = int(np.argmin(L))
     knee_points[scenario_name] = (n_opens[knee_idx], service_costs[knee_idx], alphas_pareto[knee_idx])
-    
+
     color = scenario_colors[scenario_name]
     marker = scenario_markers[scenario_name]
-    
+
     ax.scatter(n_opens, service_costs, c=color, marker=marker, s=50, alpha=0.7,
                label=f"{scenario_name}", zorder=3)
-    
+
     # Sort by n_opens for line
     sort_idx = np.argsort(n_opens)
     ax.plot(np.array(n_opens)[sort_idx], np.array(service_costs)[sort_idx],
             color=color, alpha=0.4, linestyle="--", linewidth=1)
-    
+
     # Mark knee point
     kx, ky, ka = knee_points[scenario_name]
     ax.scatter([kx], [ky], c=color, marker="*", s=300, edgecolors="white",
-               linewidths=1.5, zorder=5, label=f"Knee ({scenario_name}, α={ka:.2f})")
+               linewidths=1.5, zorder=5, label=f"Sweep knee ({scenario_name}, α={ka:.2f})")
+
+    # Mark the reported operating point on the blended curve
+    if scenario_name == "Blended":
+        res_op = solve_cflp(w, t_matrix, r, ALPHA, Q, Q0, method="greedy")
+        _, service_op = split_costs(res_op, r, ALPHA, Q, Q0)
+        ax.scatter([int(res_op["y"].sum())], [service_op], facecolors="none",
+                   edgecolors="white", s=260, linewidths=2, zorder=6,
+                   label=f"Operating point (α={ALPHA:.2f}, {int(res_op['y'].sum())} DCs)")
 
 ax.set_xlabel("Number of Open DCs", fontsize=12)
 ax.set_ylabel("Total Service Cost", fontsize=12)
 ax.set_title("Pareto Curve: Service Cost vs Number of Open DCs\n(Peak / Off-Peak / Blended Comparison)", fontsize=13)
-ax.legend(fontsize=9, loc="upper right")
+ax.legend(fontsize=8, loc="upper right")
 ax.grid(alpha=0.2)
 
 plt.tight_layout()
@@ -415,11 +422,15 @@ if res_golden and res_fib:
     golden_hist = res_golden["history"]
     fib_hist = res_fib["history"]
     
+    # The two methods track each other almost exactly, so Fibonacci is drawn as
+    # a thin dashed overlay — otherwise it hides the Golden Section curve entirely.
     ax3.plot([h["iter"] for h in golden_hist], [h["L"] for h in golden_hist],
-             "o-", color="#f1c40f", markersize=4, label="Golden Section", alpha=0.8)
+             "o-", color="#f1c40f", markersize=6, linewidth=2,
+             label="Golden Section", alpha=0.9, zorder=2)
     ax3.plot([h["iter"] for h in fib_hist], [h["L"] for h in fib_hist],
-             "s-", color="#2ecc71", markersize=4, label="Fibonacci", alpha=0.8)
-    
+             "s--", color="#2ecc71", markersize=4, linewidth=1.2,
+             label="Fibonacci", alpha=0.95, zorder=3)
+
     ax3.set_xlabel("Iteration")
     ax3.set_ylabel("L(α)")
     ax3.set_title("1D Search Convergence L(α)", fontsize=12, color="white")

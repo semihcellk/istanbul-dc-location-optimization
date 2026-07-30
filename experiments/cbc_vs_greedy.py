@@ -19,30 +19,26 @@ _BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _BASE_DIR not in sys.path:
     sys.path.insert(0, _BASE_DIR)
 
+import config
 from model.cflp import solve_cflp
 
-# ── parameters ────────────────────────────────────────────────────────────────
+# ── parameters (single source of truth: config.py) ────────────────────────────
 
-ALPHA = 1.37         # operating point from the 1D parameter search (Golden+Fibonacci, α≈1.37)
-Q     = 200_000.0    # DC capacity
-Q0    = 100_000.0    # reference capacity
-CBC_TIME_LIMIT = 120 # seconds per CBC run
+ALPHA = config.ALPHA
+Q = config.Q
+Q0 = config.Q0
+CBC_TIME_LIMIT = config.CBC_TIME_LIMIT
 
 # Instance sizes to test: small → medium → large
-# CBC is skipped for n>400 (too many variables for a 120s limit)
-INSTANCE_SIZES = [20, 50, 100, 200, 400, 890]
-CBC_MAX_N      = 400   # skip CBC for instances larger than this
+# CBC is skipped above CBC_MAX_N (too many variables for the time limit)
+INSTANCE_SIZES = config.INSTANCE_SIZES
+CBC_MAX_N = config.CBC_MAX_N
+RESULTS_DIR = config.RESULTS_DIR
 
 # ── data loading ──────────────────────────────────────────────────────────────
 
-DATA_DIR    = os.path.join(_BASE_DIR, "data", "processed")
-RESULTS_DIR = os.path.join(_BASE_DIR, "results")
-
 print("Loading data...")
-df_n   = pd.read_csv(os.path.join(DATA_DIR, "neighborhoods.csv"))
-t_full = np.load(os.path.join(DATA_DIR, "travel_times.npy"))
-w_full = df_n["population"].values.astype(float)
-r_full = df_n["rent_per_m2"].values.astype(float)
+w_full, t_full, r_full, df_n = config.load_instance()
 
 print(f"Loaded {len(w_full)} neighborhoods, travel matrix {t_full.shape}")
 print(f"Parameters: alpha={ALPHA}, Q={Q:,.0f}, Q0={Q0:,.0f}, CBC limit={CBC_TIME_LIMIT}s\n")
@@ -67,7 +63,7 @@ for n in INSTANCE_SIZES:
 
         # Ensure gap is a proper float (NaN if not available, not empty)
         gap_val = res["gap"]
-        if gap_val is None or (isinstance(gap_val, float) and np.isnan(gap_val)):
+        if gap_val is None:
             gap_val = float("nan")
 
         row = {
@@ -76,13 +72,13 @@ for n in INSTANCE_SIZES:
             "runtime_s":       round(res["runtime"], 3),
             "objective_value": round(res["objective"], 2),
             "n_open_dcs":      int(res["y"].sum()),
-            "gap":             gap_val,
+            "gap":             float(gap_val),
+            "status":          res["status"],
         }
         rows.append(row)
+        gap_str = "nan" if np.isnan(row["gap"]) else f"{row['gap']:.4f}"
         print(f"runtime={row['runtime_s']:.2f}s  obj={row['objective_value']:.0f}  "
-              f"n_open={row['n_open_dcs']}  gap={row['gap']:.4f}" if not np.isnan(row["gap"])
-              else f"runtime={row['runtime_s']:.2f}s  obj={row['objective_value']:.0f}  "
-                   f"n_open={row['n_open_dcs']}  gap=nan")
+              f"n_open={row['n_open_dcs']}  gap={gap_str}  status={row['status']}")
 
 # ── save results ──────────────────────────────────────────────────────────────
 
@@ -102,4 +98,11 @@ print("\nObjective ratio (greedy / CBC) for matched instances:")
 grp = df_out.pivot(index="instance_size", columns="method", values="objective_value")
 if "cbc" in grp and "greedy" in grp:
     grp["greedy_ratio"] = grp["greedy"] / grp["cbc"]
-    print(grp[["cbc", "greedy", "greedy_ratio"]].dropna().to_string())
+    matched = grp[["cbc", "greedy", "greedy_ratio"]].dropna()
+    print(matched.to_string())
+    print(f"\nMean greedy excess cost over CBC: "
+          f"{100 * (matched['greedy_ratio'].mean() - 1):.2f}%")
+
+    speed = df_out.pivot(index="instance_size", columns="method", values="runtime_s").dropna()
+    print(f"Median CBC/greedy runtime factor: "
+          f"{(speed['cbc'] / speed['greedy']).median():,.0f}×")

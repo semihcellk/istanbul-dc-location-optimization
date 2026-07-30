@@ -3,10 +3,14 @@
 Data preparation script.
 
 Inputs  (data/raw/):
-  - Muhtarlık Adres Bilgileri  : IBB muhtarlık GeoJSON (neighborhood coordinates)
-  - pivot.csv                  : TUIK neighborhood populations (2025)
-  - istanbul_ilce_kira_fiyatlari.csv : Endeksa district-level rent per m²
+  - Muhtarlık Adres Bilgileri     : IBB muhtarlık GeoJSON (neighborhood coordinates)
+  - pivot.csv                     : TUIK neighborhood populations (2025)
+  - istanbul_tum_mahalleler.csv   : Endeksa neighborhood-level rent per m²
+  - istanbul_tum_ilceler.csv      : Endeksa district-level rent per m² (fallback)
   - IBB Hourly Traffic Density (fetched live) : month of hourly geohash speeds
+
+Run from the project root:
+    python data/prepare_data.py
 
 Outputs (data/processed/):
   - neighborhoods.csv          : neighborhood id, name, district, lat, lon, population (w_i)
@@ -21,13 +25,18 @@ Travel times are built from a one-month average of HOURLY traffic speeds
 """
 
 import json
+import os
 import re
 import numpy as np
 import pandas as pd
 import requests
 
-RAW = "data/raw"
-OUT = "data/processed"
+# Resolved from this file's location so the script works from any working
+# directory, not only from the project root.
+_HERE = os.path.dirname(os.path.abspath(__file__))
+RAW = os.path.join(_HERE, "raw")
+OUT = os.path.join(_HERE, "processed")
+os.makedirs(OUT, exist_ok=True)
 
 # helpers
 def haversine_matrix(lats, lons):
@@ -153,10 +162,14 @@ print("4. Processing Endeksa rent data (neighborhood + district)...")
 # Parse district level data first
 df_dist_rent = pd.read_csv(f"{RAW}/istanbul_tum_ilceler.csv", sep=";")
 def parse_rent(val):
-    if pd.isna(val) or val == "-" or "₺" not in str(val): return np.nan
+    """'528 ₺/m 2' → 528.0 ; '-' or malformed → NaN."""
+    if pd.isna(val) or val == "-" or "₺" not in str(val):
+        return np.nan
     v = str(val).split("₺")[0].replace(".", "").strip()
-    try: return float(v)
-    except: return np.nan
+    try:
+        return float(v)
+    except ValueError:
+        return np.nan
 
 df_dist_rent["avg_rent_per_m2"] = df_dist_rent["Birim Fiyatı (₺/m2)"].apply(parse_rent)
 df_dist_rent["district"] = df_dist_rent["Mahalle"].apply(normalize)
@@ -347,7 +360,6 @@ print(f"   Saved → travel_times_peak.npy, travel_times_offpeak.npy, travel_tim
 print(f"   Saved → neighborhood_speeds.csv (per-neighborhood peak/offpeak/blended km/h)")
 
 print("\nDone. data/processed/ contents:")
-import os
 for f in sorted(os.listdir(OUT)):
     size = os.path.getsize(f"{OUT}/{f}")
     print(f"   {f}  ({size/1024:.1f} KB)")

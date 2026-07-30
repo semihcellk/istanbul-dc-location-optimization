@@ -91,26 +91,20 @@ def run_robustness(w, t, r, alpha, Q, Q0, deltas=None, n_repeat=30, seed=42):
 # ── standalone runner ─────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    BASE_DIR  = _BASE_DIR
-    DATA_DIR  = os.path.join(BASE_DIR, "data", "processed")
-    RESULTS_DIR = os.path.join(BASE_DIR, "results")
+    import config
 
     print("Loading data...")
-    df_n = pd.read_csv(os.path.join(DATA_DIR, "neighborhoods.csv"))
-    t    = np.load(os.path.join(DATA_DIR, "travel_times.npy"))
-    w    = df_n["population"].values.astype(float)
-    r    = df_n["rent_per_m2"].values.astype(float)
+    w, t, r, _ = config.load_instance()
 
-    # Operating point chosen from the 1D parameter search (Golden+Fibonacci agree at α≈1.37,
-    # Q fixed at 200000, Q0=100000). See search_comparison.csv.
-    ALPHA = 1.37
-    Q     = 200_000.0
-    Q0    = 100_000.0
-    DELTAS   = [0.05, 0.10, 0.20, 0.30]
-    N_REPEAT = 30
+    # Operating point comes from the 1D parameter search — see config.py
+    ALPHA, Q, Q0 = config.ALPHA, config.Q, config.Q0
+    DELTAS = config.ROBUSTNESS_DELTAS
+    N_REPEAT = config.ROBUSTNESS_REPEATS
+    RESULTS_DIR = config.RESULTS_DIR
 
     print(f"Running robustness simulation: {len(DELTAS)} deltas × {N_REPEAT} repeats = {len(DELTAS)*N_REPEAT} runs")
-    df_results = run_robustness(w, t, r, ALPHA, Q, Q0, deltas=DELTAS, n_repeat=N_REPEAT)
+    df_results = run_robustness(w, t, r, ALPHA, Q, Q0, deltas=DELTAS,
+                                n_repeat=N_REPEAT, seed=config.RANDOM_SEED)
 
     os.makedirs(RESULTS_DIR, exist_ok=True)
     out_path = os.path.join(RESULTS_DIR, "robustness.csv")
